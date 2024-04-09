@@ -831,7 +831,8 @@ class Job:
         # need to know the next_run time in the system time. So we convert back to naive local
         if self.at_time_zone is not None:
             self.next_run = self._normalize_preserve_timestamp(self.next_run)
-            self.next_run = self.next_run.astimezone().replace(tzinfo=None)
+            # This line has to be commented out so that timezones can be used properly
+            # self.next_run = self.next_run.astimezone().replace(tzinfo=None)
 
     # Usually when normalization of a timestamp causes the timestamp to change,
     # it preserves the moment in time and changes the local timestamp.
