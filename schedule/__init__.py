@@ -210,7 +210,7 @@ class Scheduler:
         :return: The current time in the scheduler's timezone
         """
         if self.is_realtime:
-            return datetime.datetime.now()
+            return datetime.datetime.now(tz=datetime.UTC)
         else:
             return self._timestamp
 
