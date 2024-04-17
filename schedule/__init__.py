@@ -197,7 +197,9 @@ class Scheduler:
         """
         if not self.jobs:
             return None
-        jobs_filtered = self.get_jobs(tag)
+        # Filter out jobs that are in the past or are exactly at the current time
+        # Without this filter there might be an error in simulation mode when the clock goes back
+        jobs_filtered = [job for job in self.get_jobs(tag) if (job.next_run - self.timestamp).total_seconds() > 0]
         if not jobs_filtered:
             return None
         return min(jobs_filtered).next_run
