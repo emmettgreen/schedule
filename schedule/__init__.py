@@ -197,9 +197,7 @@ class Scheduler:
         """
         if not self.jobs:
             return None
-        # Filter out jobs that are in the past or are exactly at the current time
-        # Without this filter there might be an error in simulation mode when the clock goes back
-        jobs_filtered = [job for job in self.get_jobs(tag) if (job.next_run - self.timestamp).total_seconds() > 0]
+        jobs_filtered = self.get_jobs(tag)
         if not jobs_filtered:
             return None
         return min(jobs_filtered).next_run
@@ -789,6 +787,7 @@ class Job:
 
         # before we apply the .at() time, we need to normalize the timestamp
         # to ensure we change the time elements in the new timezone
+        original_day = self.next_run.day # Is required to check if the day has changed after applying the at_time
         if self.at_time_zone is not None:
             self.next_run = self.at_time_zone.normalize(self.next_run)
 
@@ -797,6 +796,7 @@ class Job:
                 raise ScheduleValueError("Invalid unit without specifying start day")
             kwargs = {"second": self.at_time.second, "microsecond": 0}
             if self.unit == "days" or self.start_day is not None:
+                kwargs["day"] = original_day
                 kwargs["hour"] = self.at_time.hour
             if self.unit in ["days", "hours"] or self.start_day is not None:
                 kwargs["minute"] = self.at_time.minute
