@@ -223,7 +223,9 @@ class Scheduler:
             raise ScheduleError(
                 "Cannot update the current time when scheduler is configured for realtime operation"
             )
-        if timestamp < self._timestamp:
+        # The timestamps must be converted to UTC, otherwise the comparison will not work during
+        # daylight saving time changes
+        if timestamp.astimezone(datetime.UTC) < self._timestamp.astimezone(datetime.UTC):
             raise ScheduleError("Cannot set the current time to a time in the past")
 
         self._timestamp = timestamp
