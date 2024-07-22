@@ -789,6 +789,8 @@ class Job:
 
         # before we apply the .at() time, we need to normalize the timestamp
         # to ensure we change the time elements in the new timezone
+        original_year = self.next_run.year # Is required to check if the day has changed after applying the at_time
+        original_month = self.next_run.month # Is required to check if the day has changed after applying the at_time
         original_day = self.next_run.day # Is required to check if the day has changed after applying the at_time
         if self.at_time_zone is not None:
             self.next_run = self.at_time_zone.normalize(self.next_run)
@@ -798,6 +800,8 @@ class Job:
                 raise ScheduleValueError("Invalid unit without specifying start day")
             kwargs = {"second": self.at_time.second, "microsecond": 0}
             if self.unit == "days" or self.start_day is not None:
+                kwargs["year"] = original_year
+                kwargs["month"] = original_month
                 kwargs["day"] = original_day
                 kwargs["hour"] = self.at_time.hour
             if self.unit in ["days", "hours"] or self.start_day is not None:
