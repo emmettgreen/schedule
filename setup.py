@@ -2,7 +2,7 @@ import codecs
 from setuptools import setup
 
 
-SCHEDULE_VERSION = "1.2.1"
+SCHEDULE_VERSION = "1.2.5"
 SCHEDULE_DOWNLOAD_URL = "https://github.com/dbader/schedule/tarball/" + SCHEDULE_VERSION
 
 
@@ -15,7 +15,7 @@ def read_file(filename):
 
 
 setup(
-    name="schedule",
+    name="simulation-schedule",
     packages=["schedule"],
     package_data={"schedule": ["py.typed"]},
     version=SCHEDULE_VERSION,

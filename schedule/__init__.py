@@ -82,8 +82,19 @@ class Scheduler:
     handle their execution.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, is_realtime=True, start_timestamp: datetime.datetime | None = None) -> None:
         self.jobs: List[Job] = []
+        self.is_realtime = is_realtime
+        self._timestamp = start_timestamp
+
+        if self.is_realtime and self._timestamp is not None:
+            raise ScheduleError(
+                "Scheduler is configured for realtime operation, but a start timestamp was provided"
+            )
+        if not self.is_realtime and self._timestamp is None:
+            raise ScheduleError(
+                "Scheduler is configured for non-realtime operation, but no start timestamp was provided"
+            )
 
     def run_pending(self) -> None:
         """
@@ -194,6 +205,32 @@ class Scheduler:
     next_run = property(get_next_run)
 
     @property
+    def timestamp(self) -> datetime.datetime:
+        """
+        :return: The current time in the scheduler's timezone
+        """
+        if self.is_realtime:
+            return datetime.datetime.now(tz=datetime.UTC)
+        else:
+            return self._timestamp
+
+    @timestamp.setter
+    def timestamp(self, timestamp) -> None:
+        """
+        Set the current time in the scheduler's timezone.
+        """
+        if self.is_realtime:
+            raise ScheduleError(
+                "Cannot update the current time when scheduler is configured for realtime operation"
+            )
+        # The timestamps must be converted to UTC, otherwise the comparison will not work during
+        # daylight saving time changes
+        if timestamp.astimezone(datetime.UTC) < self._timestamp.astimezone(datetime.UTC):
+            raise ScheduleError("Cannot set the current time to a time in the past")
+
+        self._timestamp = timestamp
+
+    @property
     def idle_seconds(self) -> Optional[float]:
         """
         :return: Number of seconds until
@@ -202,7 +239,7 @@ class Scheduler:
         """
         if not self.next_run:
             return None
-        return (self.next_run - datetime.datetime.now()).total_seconds()
+        return (self.next_run - self.timestamp).total_seconds()
 
 
 class Job:
@@ -606,10 +643,10 @@ class Job:
         if isinstance(until_time, datetime.datetime):
             self.cancel_after = until_time
         elif isinstance(until_time, datetime.timedelta):
-            self.cancel_after = datetime.datetime.now() + until_time
+            self.cancel_after = self.scheduler.timestamp + until_time
         elif isinstance(until_time, datetime.time):
             self.cancel_after = datetime.datetime.combine(
-                datetime.datetime.now(), until_time
+                self.scheduler.timestamp, until_time
             )
         elif isinstance(until_time, str):
             cancel_after = self._decode_datetimestr(
@@ -626,7 +663,7 @@ class Job:
                 raise ScheduleValueError("Invalid string format for until()")
             if "-" not in until_time:
                 # the until_time is a time-only format. Set the date to today
-                now = datetime.datetime.now()
+                now = self.scheduler.timestamp
                 cancel_after = cancel_after.replace(
                     year=now.year, month=now.month, day=now.day
                 )
@@ -636,7 +673,7 @@ class Job:
                 "until() takes a string, datetime.datetime, datetime.timedelta, "
                 "datetime.time parameter"
             )
-        if self.cancel_after < datetime.datetime.now():
+        if self.cancel_after < self.scheduler.timestamp:
             raise ScheduleValueError(
                 "Cannot schedule a job to run until a time in the past"
             )
@@ -670,7 +707,7 @@ class Job:
         :return: ``True`` if the job should be run now.
         """
         assert self.next_run is not None, "must run _schedule_next_run before"
-        return datetime.datetime.now() >= self.next_run
+        return self.scheduler.timestamp >= self.next_run
 
     def run(self):
         """
@@ -684,13 +721,13 @@ class Job:
                  deadline is reached.
 
         """
-        if self._is_overdue(datetime.datetime.now()):
+        if self._is_overdue(self.scheduler.timestamp):
             logger.debug("Cancelling job %s", self)
             return CancelJob
 
         logger.debug("Running job %s", self)
         ret = self.job_func()
-        self.last_run = datetime.datetime.now()
+        self.last_run = self.scheduler.timestamp
         self._schedule_next_run()
 
         if self._is_overdue(self.next_run):
@@ -717,9 +754,14 @@ class Job:
 
         # Do all computation in the context of the requested timezone
         if self.at_time_zone is not None:
-            now = datetime.datetime.now(self.at_time_zone)
+            if self.scheduler.timestamp.tzinfo is None:
+                # If the current timestamp is naive, we assume it's in the same timezone as the at_time_zone
+                now = self.scheduler.timestamp.replace(tzinfo=self.at_time_zone)
+            else:
+                # Otherwise we convert it to the at_time_zone
+                now = self.at_time_zone.normalize(self.scheduler.timestamp.astimezone(self.at_time_zone))
         else:
-            now = datetime.datetime.now()
+            now = self.scheduler.timestamp
 
         self.period = datetime.timedelta(**{self.unit: interval})
         self.next_run = now + self.period
@@ -747,6 +789,9 @@ class Job:
 
         # before we apply the .at() time, we need to normalize the timestamp
         # to ensure we change the time elements in the new timezone
+        original_year = self.next_run.year # Is required to check if the day has changed after applying the at_time
+        original_month = self.next_run.month # Is required to check if the day has changed after applying the at_time
+        original_day = self.next_run.day # Is required to check if the day has changed after applying the at_time
         if self.at_time_zone is not None:
             self.next_run = self.at_time_zone.normalize(self.next_run)
 
@@ -755,6 +800,9 @@ class Job:
                 raise ScheduleValueError("Invalid unit without specifying start day")
             kwargs = {"second": self.at_time.second, "microsecond": 0}
             if self.unit == "days" or self.start_day is not None:
+                kwargs["year"] = original_year
+                kwargs["month"] = original_month
+                kwargs["day"] = original_day
                 kwargs["hour"] = self.at_time.hour
             if self.unit in ["days", "hours"] or self.start_day is not None:
                 kwargs["minute"] = self.at_time.minute
@@ -791,7 +839,8 @@ class Job:
         # need to know the next_run time in the system time. So we convert back to naive local
         if self.at_time_zone is not None:
             self.next_run = self._normalize_preserve_timestamp(self.next_run)
-            self.next_run = self.next_run.astimezone().replace(tzinfo=None)
+            # This line has to be commented out so that timezones can be used properly
+            # self.next_run = self.next_run.astimezone().replace(tzinfo=None)
 
     # Usually when normalization of a timestamp causes the timestamp to change,
     # it preserves the moment in time and changes the local timestamp.
